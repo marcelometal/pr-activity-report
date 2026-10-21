@@ -1,0 +1,12 @@
+# Generated per-user data and reports
+data/*.json
+reports/*.html
+
+# Keep the folders in git
+!data/.gitkeep
+!reports/.gitkeep
+
+# OS / editor cruft
+.DS_Store
+*.swp
+__pycache__/

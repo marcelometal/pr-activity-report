@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relatório de PRs · {{NAME}} · {{ORG}}</title>
+<meta name="description" content="Atividade de pull requests de {{START}} a {{END}} na organização {{ORG}}.">
+</head>
+<body>
+<style>
+{{CSS}}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Relatório de contribuições · GitHub {{ORG}}</p>
+  <h1>Pull requests de {{NAME}}</h1>
+  <p class="lede">{{LEDE}}</p>
+  <p class="period">@{{HANDLE}} · {{START}} → {{END}}</p>
+
+  <div class="stats">
+    <div class="stat"><div class="num">{{TOTAL}}</div><div class="lbl">PRs abertos no período</div></div>
+    <div class="stat m"><div class="num">{{MERGED}}</div><div class="lbl">merged ({{PCT}}%)</div></div>
+    <div class="stat o"><div class="num">{{OPEN}}</div><div class="lbl">ainda abertos</div></div>
+    <div class="stat"><div class="num">{{REPOS}}</div><div class="lbl">repositórios distintos</div></div>
+  </div>
+
+  <section>
+    <h2>Atividade por mês</h2>
+    <div class="chart" id="chart"></div>
+    <div class="legend">
+      <span><i class="dot m"></i> Merged</span>
+      <span><i class="dot o"></i> Aberto</span>
+      <span><i class="dot c"></i> Fechado sem merge</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Projetos mais ativos <span style="font-weight:400;text-transform:none;letter-spacing:0">{{MONONOTE}}</span></h2>
+    <div class="repos" id="repos"></div>
+  </section>
+{{THEMES}}
+  <section>
+    <h2>Participação em PRs de outras pessoas</h2>
+    <div class="stats" style="margin-top:0">
+      <div class="stat"><div class="num">{{RTOTAL}}</div><div class="lbl">PRs em que participou</div></div>
+      <div class="stat r"><div class="num">{{RREVIEW}}</div><div class="lbl">com review formal</div></div>
+      <div class="stat cm"><div class="num">{{RCOMMENT}}</div><div class="lbl">só comentário</div></div>
+      <div class="stat"><div class="num">{{RAUTHORS}}</div><div class="lbl">autores diferentes</div></div>
+    </div>
+    <h3 style="font-size:14px;margin:34px 0 16px;color:var(--ink-soft);font-weight:600">Quem mais acompanhou</h3>
+    <div class="repos" id="authors"></div>
+    <h3 style="font-size:14px;margin:34px 0 16px;color:var(--ink-soft);font-weight:600">Projetos que mais revisou <span style="font-weight:400;font-size:12.5px">{{MONONOTE}}</span></h3>
+    <div class="repos" id="rprojects"></div>
+    <div class="controls" id="rcontrols" style="margin-top:34px"></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Data</th><th>Projeto</th><th>PR</th><th class="title-cell">Título</th><th>Autor</th><th>Participação</th><th>Estado</th></tr></thead>
+        <tbody id="rrows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Todos os pull requests abertos</h2>
+    <div class="controls" id="controls"></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Data</th><th>Projeto</th><th>PR</th><th class="title-cell">Título</th><th>Estado</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="foot">Gerado em {{GENERATED}} a partir da GitHub Search API · autor @{{HANDLE}} · org {{ORG}} · {{WINDOW}}</p>
+</div>
+
+<script>
+const DATA = {{DATA_JSON}};
+const REVIEWS = {{REVIEWS_JSON}};
+const months = {{MONTHS_JSON}};
+const moName = {{MONAME_JSON}};
+const stateLabel = {merged:"Merged", open:"Aberto", closed:"Fechado"};
+
+/* monthly chart */
+const byMonth = {};
+months.forEach(m=>byMonth[m]={merged:0,open:0,closed:0,total:0});
+DATA.forEach(p=>{const k=p.d.slice(0,7); if(byMonth[k]){byMonth[k][p.s]++;byMonth[k].total++;}});
+const maxM = Math.max(...months.map(m=>byMonth[m].total));
+const chart = document.getElementById("chart");
+months.forEach(m=>{
+  const b=byMonth[m], h=b.total/maxM*100;
+  const col=document.createElement("div"); col.className="col";
+  col.innerHTML=`<div class="cnt">${b.total||""}</div>
+    <div class="bars" style="height:${h}%" title="${b.merged} merged · ${b.open} abertos · ${b.closed} fechados">
+      <div class="seg c" style="height:${b.total?b.closed/b.total*100:0}%"></div>
+      <div class="seg o" style="height:${b.total?b.open/b.total*100:0}%"></div>
+      <div class="seg m" style="height:${b.total?b.merged/b.total*100:0}%"></div>
+    </div>
+    <div class="mo">${moName[m]}</div>`;
+  chart.appendChild(col);
+});
+
+/* project id/label: monorepos broken down by internal project when p is set */
+const projId = p => p.p ? `${p.r} / ${p.p}` : p.r;
+const projLabel = p => p.p
+  ? `<span class="mono-org">${p.r} /</span> <b>${p.p}</b>`
+  : p.r;
+
+/* top projects (authored) */
+const repoCount={}, repoSample={};
+DATA.forEach(p=>{const id=projId(p);repoCount[id]=(repoCount[id]||0)+1;repoSample[id]=p;});
+const topRepos=Object.entries(repoCount).sort((a,b)=>b[1]-a[1]).slice(0,15);
+const maxR=topRepos[0][1];
+const reposEl=document.getElementById("repos");
+reposEl.className="repos projwide";
+topRepos.forEach(([id,c])=>{
+  const d=document.createElement("div"); d.className="repo";
+  d.innerHTML=`<div class="rn" title="${id}">${projLabel(repoSample[id])}</div>
+    <div class="track"><div class="fill" style="width:${c/maxR*100}%"></div></div>
+    <div class="rc">${c}</div>`;
+  reposEl.appendChild(d);
+});
+
+/* filters + table */
+let filter="all";
+const counts={all:DATA.length,merged:0,open:0,closed:0};
+DATA.forEach(p=>counts[p.s]++);
+const controls=document.getElementById("controls");
+[["all","Todos"],["merged","Merged"],["open","Abertos"],["closed","Fechados"]].forEach(([k,lbl])=>{
+  const b=document.createElement("button"); b.className="chip"; b.setAttribute("aria-pressed",k==="all");
+  b.innerHTML=`${lbl} <span class="c">${counts[k]}</span>`;
+  b.onclick=()=>{filter=k;render();[...controls.children].forEach(c=>c.setAttribute("aria-pressed",false));b.setAttribute("aria-pressed",true);};
+  controls.appendChild(b);
+});
+const rows=document.getElementById("rows");
+function render(){
+  rows.innerHTML="";
+  DATA.filter(p=>filter==="all"||p.s===filter).forEach(p=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td class="date">${p.d}</td>
+      <td class="repo-cell">${p.r}${p.p?`<span class="sub">${p.p}</span>`:""}</td>
+      <td class="pr"><a href="${p.u}" target="_blank" rel="noopener">#${p.n}</a></td>
+      <td class="title-cell">${p.t.replace(/</g,"&lt;")}</td>
+      <td><span class="st ${p.s}">${stateLabel[p.s]}</span></td>`;
+    rows.appendChild(tr);
+  });
+}
+render();
+
+/* ---- reviews ---- */
+const authorCount={};
+REVIEWS.forEach(p=>authorCount[p.a]=(authorCount[p.a]||0)+1);
+const topAuthors=Object.entries(authorCount).sort((a,b)=>b[1]-a[1]).slice(0,15);
+const maxA=topAuthors[0][1];
+const authorsEl=document.getElementById("authors");
+topAuthors.forEach(([a,c])=>{
+  const d=document.createElement("div"); d.className="repo";
+  d.innerHTML=`<div class="rn" title="${a}">${a}</div>
+    <div class="track"><div class="fill" style="width:${c/maxA*100}%"></div></div>
+    <div class="rc">${c}</div>`;
+  authorsEl.appendChild(d);
+});
+
+/* top projects reviewed: monorepos broken down by internal project when p is set */
+const projCount={}, projSample={};
+REVIEWS.forEach(p=>{const id=projId(p);projCount[id]=(projCount[id]||0)+1;projSample[id]=p;});
+const topProjects=Object.entries(projCount).sort((a,b)=>b[1]-a[1]).slice(0,15);
+const maxP=topProjects[0][1];
+const rprojEl=document.getElementById("rprojects");
+rprojEl.className="repos projwide";
+topProjects.forEach(([id,c])=>{
+  const d=document.createElement("div"); d.className="repo";
+  d.innerHTML=`<div class="rn" title="${id}">${projLabel(projSample[id])}</div>
+    <div class="track"><div class="fill" style="width:${c/maxP*100}%"></div></div>
+    <div class="rc">${c}</div>`;
+  rprojEl.appendChild(d);
+});
+
+const kindLabel={review:"Review",comment:"Comentário"};
+let rfilter="all";
+const rcounts={all:REVIEWS.length,review:0,comment:0};
+REVIEWS.forEach(p=>rcounts[p.k]++);
+const rcontrols=document.getElementById("rcontrols");
+[["all","Todos"],["review","Com review"],["comment","Só comentário"]].forEach(([k,lbl])=>{
+  const b=document.createElement("button"); b.className="chip"; b.setAttribute("aria-pressed",k==="all");
+  b.innerHTML=`${lbl} <span class="c">${rcounts[k]}</span>`;
+  b.onclick=()=>{rfilter=k;renderR();[...rcontrols.children].forEach(c=>c.setAttribute("aria-pressed",false));b.setAttribute("aria-pressed",true);};
+  rcontrols.appendChild(b);
+});
+const rrows=document.getElementById("rrows");
+function renderR(){
+  rrows.innerHTML="";
+  REVIEWS.filter(p=>rfilter==="all"||p.k===rfilter).forEach(p=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td class="date">${p.d}</td>
+      <td class="repo-cell">${p.r}${p.p?`<span class="sub">${p.p}</span>`:""}</td>
+      <td class="pr"><a href="${p.u}" target="_blank" rel="noopener">#${p.n}</a></td>
+      <td class="title-cell">${p.t.replace(/</g,"&lt;")}</td>
+      <td class="repo-cell">${p.a}</td>
+      <td><span class="kind ${p.k}">${kindLabel[p.k]}</span></td>
+      <td><span class="st ${p.s}">${stateLabel[p.s]}</span></td>`;
+    rrows.appendChild(tr);
+  });
+}
+renderR();
+</script>
+
+</body>
+</html>
